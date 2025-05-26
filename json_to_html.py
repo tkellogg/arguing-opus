@@ -559,8 +559,11 @@ def main():
     if args.output:
         output_file = args.output
     else:
-        base_name = os.path.splitext(args.json_file)[0]
-        output_file = f"{base_name}.html"
+        base_name = os.path.splitext(os.path.basename(args.json_file))[0]
+        output_file = f"conversations/{base_name}.html"
+    
+    # Create conversations directory if it doesn't exist
+    os.makedirs("conversations", exist_ok=True)
     
     try:
         # Load JSON data

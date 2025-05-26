@@ -364,9 +364,17 @@ class DebateOrchestrator:
     
     def save_conversation(self, filename: str = None) -> str:
         """Save the conversation to a JSON file"""
+        # Create conversations directory if it doesn't exist
+        conversations_dir = "conversations"
+        os.makedirs(conversations_dir, exist_ok=True)
+        
         if filename is None:
             timestamp = int(time.time())
             filename = f"debate_{timestamp}.json"
+        
+        # Ensure filename goes in conversations directory
+        if not filename.startswith(conversations_dir):
+            filename = os.path.join(conversations_dir, filename)
         
         debate_data = {
             "config": asdict(self.config),
