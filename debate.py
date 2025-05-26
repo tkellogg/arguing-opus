@@ -41,6 +41,7 @@ class DebateConfig:
     topic: str
     max_turns: int = 30
     api_key: Optional[str] = None
+    model_name: str = "sonnet"
 
 
 class WebToolkit:
@@ -50,21 +51,43 @@ class WebToolkit:
     def search_web(query: str, num_results: int = 3) -> str:
         """Perform a web search and return formatted results"""
         try:
-            # Using DuckDuckGo Instant Answer API (no key required)
-            url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
-            response = requests.get(url, timeout=10)
+            import os
+            
+            # Get API key from environment
+            api_key = os.getenv('BRAVE_SEARCH_API_KEY')
+            if not api_key:
+                return "Error: BRAVE_SEARCH_API_KEY environment variable not set"
+            
+            url = "https://api.search.brave.com/res/v1/web/search"
+            headers = {
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip',
+                'X-Subscription-Token': api_key
+            }
+            
+            params = {
+                'q': query,
+                'count': num_results,
+                'search_lang': 'en',
+                'country': 'US',
+                'safesearch': 'moderate',
+                'freshness': 'pw'
+            }
+            
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
             data = response.json()
             
             results = []
-            if data.get('Abstract'):
-                results.append(f"Summary: {data['Abstract']}")
             
-            if data.get('RelatedTopics'):
-                for i, topic in enumerate(data['RelatedTopics'][:num_results]):
-                    if isinstance(topic, dict) and 'Text' in topic:
-                        results.append(f"Result {i+1}: {topic['Text']}")
+            if data.get('web', {}).get('results'):
+                for i, result in enumerate(data['web']['results'], 1):
+                    title = result.get('title', 'No title')
+                    url = result.get('url', '')
+                    description = result.get('description', 'No description')
+                    results.append(f"{i}. {title}\n   {url}\n   {description}\n")
             
-            return "\n".join(results) if results else f"No detailed results found for '{query}'"
+            return "\n".join(results) if results else f"No search results found for '{query}'"
             
         except Exception as e:
             return f"Search error: {str(e)}"
@@ -108,7 +131,7 @@ class ClaudeDebater:
         self.position = None  # Will be determined dynamically
         self.web_toolkit = WebToolkit()
     
-    def generate_response(self, conversation_history: List[Message], topic: str) -> tuple[str, List[SearchQuery]]:
+    def generate_response(self, conversation_history: List[Message], topic: str, model_name: str) -> tuple[str, List[SearchQuery]]:
         """Generate a response from this Claude instance"""
         
         # Convert conversation history to the format this Claude sees
@@ -246,7 +269,7 @@ You should use the web_search tool to gather supporting evidence for your respon
             
             for iteration in range(max_iterations):
                 response = self.client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model=f"claude-{model_name}-4-20250514",
                     max_tokens=8_000,
                     system=system_prompt,
                     messages=formatted_history,
@@ -257,7 +280,6 @@ You should use the web_search tool to gather supporting evidence for your respon
                 content_blocks = []
                 tool_calls = []
                 
-                print(f"🪲 [{self.participant_id}] Response includes: {', '.join(r.type for r in response.content)}")
                 for content_block in response.content:
                     if content_block.type == "text":
                         content_blocks.append(content_block.text)
@@ -288,6 +310,7 @@ You should use the web_search tool to gather supporting evidence for your respon
                                 participant=self.participant_id
                             ))
                             content = f"Search results for '{query}':\n{result}"
+                            print(f"🪲 web_search; text=\"{result}\"")
                             
                         elif tool_call.name == "web_fetch":
                             url = tool_call.input["url"]
@@ -299,6 +322,7 @@ You should use the web_search tool to gather supporting evidence for your respon
                                 url=url
                             ))
                             content = f"Content from {url}:\n{result}"
+                            print(f"🪲 web_fetch; text=\"{result}\"")
                         
                         tool_results.append({
                             "type": "tool_result",
@@ -386,7 +410,7 @@ class DebateOrchestrator:
         print(f"🔄 Maximum turns: {self.config.max_turns}")
         print("-" * 60)
         
-        while self.turn_count < self.config.max_turns:
+        while self.turn_count < self.config.max_turns*2:
             self.turn_count += 1
             current_participant = "claude_1" if self.current_speaker == self.claude_1 else "claude_2"
             position = self.current_speaker.position
@@ -397,7 +421,8 @@ class DebateOrchestrator:
             # Generate response
             response, search_queries = self.current_speaker.generate_response(
                 self.conversation_history, 
-                self.config.topic
+                self.config.topic,
+                self.config.model_name,
             )
             
             # Add to conversation history
@@ -477,6 +502,7 @@ def main():
     parser = argparse.ArgumentParser(description="Claude Debate Tool")
     parser.add_argument("topic", nargs='?', help="The debate topic")
     parser.add_argument("--turns", type=int, default=30, help="Maximum number of turns (default: 30)")
+    parser.add_argument("--model", default="sonnet", help="The model to use, either 'sonnet' or 'opus' (default: sonnet)")
     parser.add_argument("--output", help="Output filename (default: auto-generated)")
     parser.add_argument("--api-key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)")
     parser.add_argument("--debug-search", help="Test web search functionality with a query")
@@ -496,7 +522,8 @@ def main():
     config = DebateConfig(
         topic=args.topic,
         max_turns=args.turns,
-        api_key=args.api_key
+        api_key=args.api_key,
+        model_name=args.model
     )
     
     try:
@@ -506,6 +533,39 @@ def main():
         
         # Save results
         output_file = orchestrator.save_conversation(args.output)
+        
+        # Generate HTML
+        import platform
+        import subprocess
+        from json_to_html import DebateHTMLGenerator
+        
+        # Determine HTML filename
+        base_name = os.path.splitext(os.path.basename(output_file))[0]
+        html_file = f"conversations/{base_name}.html"
+        
+        try:
+            # Load the JSON data we just saved
+            with open(output_file, 'r', encoding='utf-8') as f:
+                debate_data = json.load(f)
+            
+            # Generate HTML using the imported class
+            generator = DebateHTMLGenerator()
+            html_content = generator.generate_html(debate_data)
+            
+            # Write HTML file
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            print(f"🎨 HTML generated: {html_file}")
+            
+            # Open HTML file on Mac
+            if platform.system() == "Darwin":  # macOS
+                html_path = os.path.abspath(html_file)
+                subprocess.run(["open", html_path], check=False)
+                print(f"🌐 Opened in browser: {html_path}")
+                
+        except Exception as e:
+            print(f"⚠️  Error with HTML generation: {e}")
         
         print(f"\n✅ Debate complete! Results saved to {output_file}")
         
