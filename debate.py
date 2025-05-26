@@ -407,7 +407,7 @@ class DebateOrchestrator:
         
         print(f"🎭 Starting debate: {self.config.topic}")
         print(f"📊 Claude 1 and Claude 2 will choose their own positions")
-        print(f"🔄 Maximum turns: {self.config.max_turns}")
+        print(f"🔄 Turns per participant: {self.config.max_turns} (total: {self.config.max_turns*2})")
         print("-" * 60)
         
         while self.turn_count < self.config.max_turns*2:
@@ -444,7 +444,7 @@ class DebateOrchestrator:
             # Brief pause between turns
             time.sleep(1)
         
-        print(f"\n🏁 Debate completed after {self.config.max_turns} turns")
+        print(f"\n🏁 Debate completed after {self.turn_count} total turns ({self.config.max_turns} per participant)")
         return [asdict(msg) for msg in self.conversation_history]
     
     def save_conversation(self, filename: str = None) -> str:
@@ -501,7 +501,7 @@ def debug_search(query: str):
 def main():
     parser = argparse.ArgumentParser(description="Claude Debate Tool")
     parser.add_argument("topic", nargs='?', help="The debate topic")
-    parser.add_argument("--turns", type=int, default=30, help="Maximum number of turns (default: 30)")
+    parser.add_argument("--turns", type=int, default=30, help="Number of turns each participant gets (default: 30)")
     parser.add_argument("--model", default="sonnet", help="The model to use, either 'sonnet' or 'opus' (default: sonnet)")
     parser.add_argument("--output", help="Output filename (default: auto-generated)")
     parser.add_argument("--api-key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)")

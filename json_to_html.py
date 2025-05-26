@@ -449,6 +449,9 @@ class DebateHTMLGenerator:
             timestamp = self.format_timestamp(msg['timestamp'])
             content = self.process_message_content(msg['content'])
             
+            # Calculate participant-specific turn number
+            participant_turn = (i + 1) // 2 if i % 2 == 1 else i // 2
+            
             # Generate search queries section
             search_queries_html = ""
             if msg.get('searches') and len(msg['searches']) > 0:
@@ -471,7 +474,7 @@ class DebateHTMLGenerator:
             
             messages_html += f'''
             <div class="message {participant_class}">
-                <div class="turn-number">Turn {i}</div>
+                <div class="turn-number">{participant_name} Turn {participant_turn}</div>
                 <div class="message-header">
                     <div class="participant">{participant_name}</div>
                     <div class="timestamp">{timestamp}</div>
@@ -513,7 +516,7 @@ class DebateHTMLGenerator:
                 <div class="metadata-value">{self.format_timestamp(metadata['start_time']) if metadata.get('start_time') else 'Unknown'}</div>
             </div>
             <div class="metadata-item">
-                <div class="metadata-label">Max Turns</div>
+                <div class="metadata-label">Turns Per Participant</div>
                 <div class="metadata-value">{config.get('max_turns', 'Unknown')}</div>
             </div>
         </div>
