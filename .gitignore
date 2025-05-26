@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+conversations/
 .env
 =======
 # Byte-compiled / optimized / DLL files
@@ -175,4 +175,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
->>>>>>> origin/main
+
+**/.claude/settings.local.json
