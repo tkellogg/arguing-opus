@@ -108,7 +108,7 @@ class ClaudeDebater:
         self.position = None  # Will be determined dynamically
         self.web_toolkit = WebToolkit()
     
-    def generate_response(self, conversation_history: List[Message], topic: str) -> str:
+    def generate_response(self, conversation_history: List[Message], topic: str) -> tuple[str, List[SearchQuery]]:
         """Generate a response from this Claude instance"""
         
         # Convert conversation history to the format this Claude sees
@@ -137,19 +137,19 @@ You are about to engage in a debate on: "{topic}"
 
 Your task: Choose which side of this debate you want to argue and present your opening statement.
 
-You have access to web tools:
-- [SEARCH: your query] - search the web for information
-- [FETCH: url] - download content from a specific URL
+You have access to web search tools to research your position:
+- Use the web_search tool to find current information and evidence
+- Use the web_fetch tool to get detailed content from specific URLs
 
 Instructions:
 1. First, decide what position you want to take on this topic
-2. Research the topic thoroughly using web tools to gather current evidence
-3. Present a compelling opening argument with supporting evidence
-4. Your goal is to convince your opponent that your position is correct
-5. Keep your response focused but substantive (aim for 200-400 words)
-6. Use current events and recent data where relevant
+2. **IMPORTANT**: Use the web_search tool to research current evidence before making your argument
+3. Search for recent data, studies, and current events related to your position
+4. Present a compelling opening argument incorporating the search results
+5. Your goal is to convince your opponent that your position is correct
+6. Keep your response focused but substantive (aim for 200-400 words)
 
-Begin by choosing your position and making your opening statement."""
+You must use the web_search tool to gather evidence before presenting your argument."""
                 user_prompt = f"Choose your position and make your opening argument on: {topic}"
             else:
                 # Second Claude must take the opposite position
@@ -160,22 +160,24 @@ You are engaging in a debate on: "{topic}"
 
 Your opponent has taken the position: {opponent_position}
 
-Your task: Take the OPPOSITE position and argue against them convincingly.
+Your task: You MUST take the OPPOSITE position from your opponent and argue AGAINST their stance convincingly.
 
-You have access to web tools:
-- [SEARCH: your query] - search the web for information  
-- [FETCH: url] - download content from a specific URL
+CRITICAL: Whatever position your opponent took, you must take the opposite side. If they are "for" something, you must be "against" it. If they are "against" something, you must be "for" it. You cannot agree with them - this is a debate where you must oppose their position.
+
+You have access to web search tools to research your counter-position:
+- Use the web_search tool to find current information and evidence
+- Use the web_fetch tool to get detailed content from specific URLs
 
 Instructions:
 1. Analyze your opponent's argument carefully
-2. Research counter-evidence using web tools and current data
-3. Present a strong counter-argument with supporting evidence
-4. Address their specific points while building your own case
-5. Your goal is to convince them (and any observers) that you are right
-6. Keep responses focused but substantive (aim for 200-400 words)
-7. Use current events and recent data where relevant
+2. **IMPORTANT**: Use the web_search tool to find counter-evidence and current data
+3. Search for information that contradicts or challenges their claims
+4. Present a strong counter-argument incorporating your search results
+5. Address their specific points while building your own case
+6. Your goal is to convince them (and any observers) that you are right
+7. Keep responses focused but substantive (aim for 200-400 words)
 
-Respond to their argument and present your counter-position."""
+You must use the web_search tool to gather counter-evidence before presenting your argument."""
                 user_prompt = "Present your counter-argument and opposing position."
         else:
             # Continuing debate - position already established
@@ -185,88 +187,146 @@ You are participating in an ongoing debate on: "{topic}"
 
 Your established position: {self.position}
 
-You have access to web tools:
-- [SEARCH: your query] - search the web for information
-- [FETCH: url] - download content from a specific URL
+You have access to web search tools to research supporting evidence:
+- Use the web_search tool to find current information and evidence
+- Use the web_fetch tool to get detailed content from specific URLs
 
 Instructions:
 1. Respond directly to your opponent's latest argument
-2. Use web tools to find current evidence supporting your position
-3. Address their points while strengthening your own case
-4. Be persuasive and use concrete evidence
-5. Your goal is to convince them they are wrong and you are right
-6. Keep responses focused (aim for 200-400 words)
-7. Use current events and recent data where relevant
+2. **IMPORTANT**: Use the web_search tool to find current evidence supporting your position
+3. Search for data that refutes their claims and supports your stance
+4. Address their points while strengthening your own case with search results
+5. Be persuasive and use concrete evidence from your searches
+6. Your goal is to convince them they are wrong and you are right
+7. Keep responses focused (aim for 200-400 words)
 
-Continue the debate by responding to their latest argument."""
+You should use the web_search tool to gather supporting evidence for your response."""
             user_prompt = "Respond to your opponent's argument and continue making your case."
 
         
         formatted_history.append({"role": "user", "content": user_prompt})
         
+        # Define available tools for Claude
+        tools = [
+            {
+                "name": "web_search",
+                "description": "Search the web for current information to support your arguments",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to look up current information"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "web_fetch",
+                "description": "Fetch content from a specific URL to get detailed information",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to fetch content from"
+                        }
+                    },
+                    "required": ["url"]
+                }
+            }
+        ]
+
+
         try:
-            response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=8_000,
-                system=system_prompt,
-                messages=formatted_history,
-            )
+            max_iterations = 50  # Allow multiple tool calls
+            search_queries = []
+            all_content = []
             
-            content = response.content[0].text
+            for iteration in range(max_iterations):
+                response = self.client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=8_000,
+                    system=system_prompt,
+                    messages=formatted_history,
+                    tools=tools
+                )
+                
+                # Handle the response
+                content_blocks = []
+                tool_calls = []
+                
+                print(f"🪲 [{self.participant_id}] Response includes: {', '.join(r.type for r in response.content)}")
+                for content_block in response.content:
+                    if content_block.type == "text":
+                        content_blocks.append(content_block.text)
+                    elif content_block.type == "tool_use":
+                        tool_calls.append(content_block)
+                
+                # Add Claude's response to the conversation
+                formatted_history.append({
+                    "role": "assistant", 
+                    "content": response.content
+                })
+                
+                # Store the text content
+                if content_blocks:
+                    all_content.extend(content_blocks)
+                
+                # Process any tool calls
+                if tool_calls:
+                    tool_results = []
+                    
+                    for tool_call in tool_calls:
+                        if tool_call.name == "web_search":
+                            query = tool_call.input["query"]
+                            result = self.web_toolkit.search_web(query)
+                            search_queries.append(SearchQuery(
+                                query=query,
+                                timestamp=time.time(),
+                                participant=self.participant_id
+                            ))
+                            content = f"Search results for '{query}':\n{result}"
+                            
+                        elif tool_call.name == "web_fetch":
+                            url = tool_call.input["url"]
+                            result = self.web_toolkit.fetch_url(url)
+                            search_queries.append(SearchQuery(
+                                query=f"Fetched: {url}",
+                                timestamp=time.time(),
+                                participant=self.participant_id,
+                                url=url
+                            ))
+                            content = f"Content from {url}:\n{result}"
+                        
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_call.id,
+                            "content": content
+                        })
+                    
+                    # Add tool results to conversation
+                    formatted_history.append({
+                        "role": "user",
+                        "content": tool_results
+                    })
+                else:
+                    # No tools called, this is the final response
+                    break
             
-            # Process any web tool requests and track searches
-            content, search_queries = self._process_web_requests(content)
+            # Combine all content
+            final_content = "\n\n".join(all_content)
             
             # Extract and store position if this is first turn
             if len(conversation_history) == 0:
-                self.position = self._extract_position_from_response(content, topic)
+                self.position = self._extract_position_from_response(final_content, topic)
             
-            return content, search_queries
+            return final_content, search_queries
             
         except Exception as e:
             return f"Error generating response: {str(e)}", []
     
-    def _process_web_requests(self, content: str) -> tuple[str, List[SearchQuery]]:
-        """Process [SEARCH: query] and [FETCH: url] requests in the content"""
-        import re
-        
-        search_queries = []
-        current_time = time.time()
-        
-        # Process search requests
-        search_pattern = r'\[SEARCH:\s*([^\]]+)\]'
-        searches = re.findall(search_pattern, content)
-        
-        for query in searches:
-            query_clean = query.strip()
-            search_results = self.web_toolkit.search_web(query_clean)
-            content = content.replace(f"[SEARCH: {query}]", f"\n[Search Results for '{query_clean}':\n{search_results}]\n")
-            
-            # Track the search query
-            search_queries.append(SearchQuery(
-                query=query_clean,
-                timestamp=current_time,
-                participant=self.participant_id
-            ))
-        
-        # Process fetch requests
-        fetch_pattern = r'\[FETCH:\s*([^\]]+)\]'
-        fetches = re.findall(fetch_pattern, content)
-        
-        for url in fetches:
-            url_clean = url.strip()
-            fetch_results = self.web_toolkit.fetch_url(url_clean)
-            content = content.replace(f"[FETCH: {url}]", f"\n[Fetched Content:\n{fetch_results}]\n")
-            
-            # Track the fetch request as a search query with URL
-            search_queries.append(SearchQuery(
-                query=f"Fetched: {url_clean}",
-                timestamp=current_time,
-                participant=self.participant_id,
-                url=url_clean
-            ))
-        
-        return content, search_queries
     
     def _extract_position_from_response(self, content: str, topic: str) -> str:
         """Extract the position this Claude has taken from their response"""
@@ -393,14 +453,44 @@ class DebateOrchestrator:
         return filename
 
 
+def debug_search(query: str):
+    """Debug function to test web search directly"""
+    print(f"🔍 Testing search for: {query}")
+    print("-" * 50)
+    
+    toolkit = WebToolkit()
+    
+    # Test web search
+    print("📝 Web Search Results:")
+    search_result = toolkit.search_web(query)
+    print(search_result)
+    print()
+    
+    # If query looks like a URL, test fetch too
+    if query.startswith(('http://', 'https://')):
+        print("🌐 Web Fetch Results:")
+        fetch_result = toolkit.fetch_url(query)
+        print(fetch_result)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Claude Debate Tool")
-    parser.add_argument("topic", help="The debate topic")
+    parser.add_argument("topic", nargs='?', help="The debate topic")
     parser.add_argument("--turns", type=int, default=30, help="Maximum number of turns (default: 30)")
     parser.add_argument("--output", help="Output filename (default: auto-generated)")
     parser.add_argument("--api-key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)")
+    parser.add_argument("--debug-search", help="Test web search functionality with a query")
     
     args = parser.parse_args()
+    
+    # Handle debug search mode
+    if args.debug_search:
+        debug_search(args.debug_search)
+        return 0
+    
+    # Require topic for normal debate mode
+    if not args.topic:
+        parser.error("topic is required unless using --debug-search")
     
     # Create debate configuration
     config = DebateConfig(
