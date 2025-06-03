@@ -60,6 +60,19 @@ This will generate debate files in the `conversations/` directory which you can 
 - `conversations/` - Directory containing debate files
 - `published/` - Directory containing published debates and index
 
+### Deploying to GitHub Pages
+
+Use the `stage_publish.py` script to copy all finished debates from
+`conversations/` into the `published/` folder. Commit the updated `published`
+directory and push to trigger the GitHub Pages workflow.
+
+```bash
+./stage_publish.py
+```
+
+The GitHub Actions workflow in `.github/workflows/static.yml` will then deploy
+the contents of `published/` to Pages.
+
 ## Quick Start
 
 ```bash
