@@ -16,6 +16,11 @@ class TestPublish(unittest.TestCase):
         self.test_html = Path(self.test_dir) / "test_debate.html"
         with open(self.test_html, "w") as f:
             f.write("<html><body>Test debate</body></html>")
+
+        # Create a matching JSON file since publish.main expects it
+        self.test_json = Path(self.test_dir) / "test_debate.json"
+        with open(self.test_json, "w") as f:
+            f.write("{}")
             
     def tearDown(self):
         os.chdir(self.original_dir)
